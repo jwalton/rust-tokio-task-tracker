@@ -246,7 +246,7 @@ impl TaskTracker {
     }
 
     /// Returns true if this token has been cancelled.
-    pub async fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.token.is_cancelled()
     }
 }
@@ -258,6 +258,15 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
         time::Duration,
     };
+
+    #[tokio::test]
+    async fn tracker_should_be_cancelled() {
+        let (spawner, waiter) = super::new();
+
+        let task = spawner.task();
+        waiter.cancel();
+        assert!(task.is_cancelled());
+    }
 
     #[tokio::test]
     async fn should_wait_for_tasks_to_complete() -> Result<(), Box<dyn std::error::Error>> {
