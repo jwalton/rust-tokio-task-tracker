@@ -244,6 +244,11 @@ impl TaskTracker {
     pub async fn cancelled(&self) {
         self.token.cancelled().await;
     }
+
+    /// Returns true if this token has been cancelled.
+    pub async fn is_cancelled(&self) -> bool {
+        self.token.is_cancelled()
+    }
 }
 
 #[cfg(test)]

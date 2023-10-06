@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "tokio-task-tracker"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "tokio",
  "tokio-util",
