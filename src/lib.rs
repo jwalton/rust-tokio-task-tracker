@@ -205,6 +205,18 @@ impl TaskTracker {
         self.clone()
     }
 
+    /// Spawn a subtask.
+    ///
+    /// The given closure will be called, passing in a task tracker.
+    pub fn spawn<T, F: FnOnce(TaskTracker) -> T>(&self, f: F) -> JoinHandle<T::Output>
+    where
+        T: Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
+        let tracker = self.subtask();
+        tokio::task::spawn(f(tracker))
+    }
+
     /// Check to see if this task has been cancelled.
     pub async fn cancelled(&self) {
         self.token.cancelled().await;

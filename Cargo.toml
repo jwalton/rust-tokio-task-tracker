@@ -1,13 +1,13 @@
 [package]
 name = "tokio-task-tracker"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "A simple graceful shutdown solution for tokio."
 license = "MIT"
 
 [dependencies]
-tokio = { version = "1.32.0", features = ["sync", "signal", "time"] }
+tokio = { version = "1.32.0", features = ["sync", "signal", "time", "rt"] }
 tokio-util = "0.7.9"
 
 [dev-dependencies]
-tokio = { version = "1.32.0", features = ["rt", "macros"] }
+tokio = { version = "1.32.0", features = ["macros"] }
