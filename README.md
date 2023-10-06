@@ -50,3 +50,18 @@ If you do not wish to allow a task to be aborted, you still need to make sure th
         tokio::time::sleep(Duration::from_secs(9999)).await;
     });
 ```
+
+You can also create a tracker via the `task` method:
+
+```rust
+    // Start a task
+    let tracker = spawner.task();
+    tokio::task::spawn(async move {
+        // Move the tracker into the task.
+        let _tracker = tracker;
+
+        // ...
+    });
+```
+
+Trackers can be used to spawn subtasks via `tracker.subtask()` or `tracker.spawn()`.

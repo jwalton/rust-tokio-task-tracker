@@ -57,6 +57,29 @@
 //! # }
 //! ```
 //!
+//! You can also create a tracker via the `task` method:
+//!
+//! ```no_run
+//! # use std::time::Duration;
+//! #
+//! # #[tokio::main(flavor = "current_thread")]
+//! # async fn main() {
+//! #     let (spawner, waiter) = tokio_task_tracker::new();
+//! #
+//!     // Start a task
+//!     let tracker = spawner.task();
+//!     tokio::task::spawn(async move {
+//!         // Move the tracker into the task.
+//!         let _tracker = tracker;
+//!
+//!         // ...
+//!     });
+//!
+//! # }
+//! ```
+//!
+//! Trackers can be used to spawn subtasks via `tracker.subtask()` or
+//! `tracker.spawn()`.
 
 use std::{
     future::Future,
