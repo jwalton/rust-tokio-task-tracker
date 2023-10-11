@@ -36,7 +36,8 @@
 //! }
 //! ```
 //!
-//! If you do not wish to allow a task to be aborted, you still need to make sure the task captures the tracker:
+//! If you do not wish to allow a task to be aborted, you still need to make sure
+//! the task captures the tracker, because TaskWaiter will wait for all trackers to be dropped:
 //!
 //! ```no_run
 //! # use std::time::Duration;
@@ -90,6 +91,11 @@ use std::{
 use tokio::{signal, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
+/// Builder is used to create a TaskSpawner and TaskWaiter.
+pub struct Builder {
+    token: Option<CancellationToken>,
+}
+
 /// TaskSpawner is used to spawn new task trackers.
 pub struct TaskSpawner {
     token: CancellationToken,
@@ -132,22 +138,47 @@ impl std::fmt::Display for Error {
 
 /// Create a new TaskSpawner and TaskWaiter.
 pub fn new() -> (TaskSpawner, TaskWaiter) {
-    let (stop_tx, stop_rx) = mpsc::channel(1);
-    let stop_tx = Arc::new(Mutex::new(Some(stop_tx)));
+    Builder::default().build()
+}
 
-    let token = CancellationToken::new();
+impl Builder {
+    /// Create a new Builder.
+    pub fn new() -> Self {
+        Builder { token: None }
+    }
 
-    (
-        TaskSpawner {
-            token: token.clone(),
-            stop_tx: stop_tx.clone(),
-        },
-        TaskWaiter {
-            token,
-            stop_tx,
-            stop_rx,
-        },
-    )
+    /// Use an existing CancellationToken for the returned TaskWaiter and TaskSpawner.
+    /// If the given token is cancelled, all associated TaskTrackers will be cancelled
+    /// as well.
+    pub fn set_cancellation_token(mut self, token: CancellationToken) -> Self {
+        self.token = Some(token);
+        self
+    }
+
+    /// Create a new TaskSpawner and TaskWaiter.
+    pub fn build(self) -> (TaskSpawner, TaskWaiter) {
+        let (stop_tx, stop_rx) = mpsc::channel(1);
+        let stop_tx = Arc::new(Mutex::new(Some(stop_tx)));
+        let token = self.token.unwrap_or(CancellationToken::new());
+
+        (
+            TaskSpawner {
+                token: token.clone(),
+                stop_tx: stop_tx.clone(),
+            },
+            TaskWaiter {
+                token,
+                stop_tx,
+                stop_rx,
+            },
+        )
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TaskSpawner {
@@ -265,6 +296,19 @@ mod tests {
 
         let task = spawner.task();
         waiter.cancel();
+        assert!(task.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn should_work_with_existing_cancellation_token() {
+        let token = CancellationToken::new();
+        let (spawner, _) = super::Builder::new()
+            .set_cancellation_token(token.clone())
+            .build();
+        let task = spawner.task();
+
+        // Cancelling the token should cancel the task.
+        token.cancel();
         assert!(task.is_cancelled());
     }
 
