@@ -88,8 +88,11 @@ use std::{
     time::Duration,
 };
 
-use tokio::{signal, sync::mpsc, task::JoinHandle};
+use shutdown::wait_for_shutdown_signal;
+use tokio::{select, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+
+mod shutdown;
 
 /// Builder is used to create a TaskSpawner and TaskWaiter.
 pub struct Builder {
@@ -119,10 +122,15 @@ pub struct TaskTracker {
     _stop_tx: Option<mpsc::Sender<()>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
+    /// Returned when we timeout waiting for all tasks to shut down.
     Timeout,
+    /// Returned when we cannot bind to the interrupt/terminate signals.
     CouldNotBindInterrupt,
+    /// Returned when we were waiting for graceful shutdown, but received a
+    /// second interrupt signal.
+    ShutdownEarly,
 }
 
 impl std::error::Error for Error {}
@@ -132,6 +140,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Timeout => write!(f, "Not all tasks finished before timeout"),
             Error::CouldNotBindInterrupt => write!(f, "Could not bind interrupt handler"),
+            Error::ShutdownEarly => write!(f, "Skipping graceful shutdown due to second interrupt"),
         }
     }
 }
@@ -215,10 +224,15 @@ impl TaskWaiter {
     }
 
     /// Wait for the application to be interrupted, and then gracefully shutdown
-    /// allowing a timeout for all tasks to quit.
+    /// allowing a timeout for all tasks to quit.  A second interrupt will cause
+    /// an immediate shutdown.
+    ///
+    /// On Unix systems, "interrupt" means a SIGINT or SIGTERM. On all other
+    /// platforms the current implementation uses `tokio::signal::ctrl_c()`
+    /// to wait for an interrupt.
     pub async fn wait_for_shutdown(self, timeout: Duration) -> Result<(), Error> {
         // Wait for the ctrl-c.
-        match signal::ctrl_c().await {
+        match wait_for_shutdown_signal().await {
             Ok(()) => {
                 // time to shut down...
             }
@@ -229,7 +243,10 @@ impl TaskWaiter {
         self.token.cancel();
 
         // Wait for everything to finish.
-        self.wait_with_timeout(timeout).await
+        select! {
+            res = self.wait_with_timeout(timeout) => res,
+            _ = wait_for_shutdown_signal() => Err(Error::ShutdownEarly),
+        }
     }
 
     /// Wait for all tasks to finish.  If tasks do not finish before the timeout,
@@ -338,8 +355,7 @@ mod tests {
         waiter.wait().await;
 
         // Should have completed.
-        let done = done.load(Ordering::SeqCst);
-        assert!(done);
+        assert!(done.load(Ordering::SeqCst));
 
         Ok(())
     }
@@ -374,8 +390,93 @@ mod tests {
         waiter.wait().await;
 
         // Should have timed out.
-        let done = done.load(Ordering::SeqCst);
-        assert!(!done);
+        assert!(!done.load(Ordering::SeqCst));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn interrupt_tests() -> Result<(), Box<dyn std::error::Error>> {
+        // Interrupt tests rely on global state in shutdown.rs to simulate
+        // SIGINT.  Need to run these serially.
+        should_wait_for_tasks_on_interrupt().await?;
+        should_stop_immediately_on_second_interrupt().await?;
+
+        Ok(())
+    }
+
+    async fn should_wait_for_tasks_on_interrupt() -> Result<(), Box<dyn std::error::Error>> {
+        shutdown::reset_before_test();
+
+        let (spawner, waiter) = super::new();
+
+        let done = Arc::new(AtomicBool::new(false));
+
+        // Start a task
+        {
+            let done = done.clone();
+            spawner.spawn(|tracker| async move {
+                tokio::select! {
+                    _ = tracker.cancelled() => {
+                        // The token was cancelled, task should shut down.
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(9999)) => {
+                        // Long running task...
+                        done.store(true, Ordering::SeqCst);
+                    }
+                }
+            });
+        }
+
+        // Send a fake shutdown signal.
+        tokio::spawn(async {
+            shutdown::send_shutdown().await;
+        });
+
+        // Wait for all tasks to complete.
+        waiter.wait_for_shutdown(Duration::from_secs(10)).await?;
+
+        // Task should have been aborted.
+        assert!(!done.load(Ordering::SeqCst));
+
+        Ok(())
+    }
+
+    async fn should_stop_immediately_on_second_interrupt() -> Result<(), Box<dyn std::error::Error>>
+    {
+        shutdown::reset_before_test();
+
+        let (spawner, waiter) = super::new();
+
+        let done = Arc::new(AtomicBool::new(false));
+
+        // Start a task
+        {
+            let done = done.clone();
+            spawner.spawn(|tracker| async move {
+                let _tracker = tracker;
+
+                // Long running task that can't be cancelled.
+                tokio::time::sleep(Duration::from_secs(99)).await;
+                done.store(true, Ordering::SeqCst);
+            });
+        }
+
+        // Send two shutdown signals. The second should cause us to die immediately.
+        tokio::spawn(async move {
+            shutdown::send_shutdown().await;
+            shutdown::send_shutdown().await;
+        });
+
+        // We shouldn't wait here, because of the second interrupt.
+        let err = waiter
+            .wait_for_shutdown(Duration::from_secs(99))
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::ShutdownEarly);
+
+        // Task should have been aborted.
+        assert!(!done.load(Ordering::SeqCst));
 
         Ok(())
     }
