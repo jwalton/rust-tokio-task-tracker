@@ -100,6 +100,7 @@ pub struct Builder {
 }
 
 /// TaskSpawner is used to spawn new task trackers.
+#[derive(Clone)]
 pub struct TaskSpawner {
     token: CancellationToken,
     stop_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
@@ -108,6 +109,8 @@ pub struct TaskSpawner {
 /// TaskWaiter is used to wait until all task trackers have been dropped.
 pub struct TaskWaiter {
     token: CancellationToken,
+    /// Shared stop_tx is shared between all TaskSpawners and the TaskWaiter, so that
+    /// when we call TaskWaiter::wait() we can drop the tx from all spawners.
     stop_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
     stop_rx: mpsc::Receiver<()>,
 }
