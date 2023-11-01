@@ -12,7 +12,7 @@ mod implementation {
 
     pub async fn wait_for_shutdown_signal() -> io::Result<()> {
         let mut sigint = signal(SignalKind::interrupt())?;
-        let mut sigterm = signal(SignalKind::interrupt())?;
+        let mut sigterm = signal(SignalKind::terminate())?;
 
         select! {
             _ = sigint.recv() => {},
