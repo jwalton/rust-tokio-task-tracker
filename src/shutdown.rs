@@ -25,8 +25,8 @@ mod implementation {
 
 #[cfg(all(not(unix), not(test)))]
 mod implementation {
-    pub async fn wait_for_shutdown_signal() -> io::Result<()> {
-        tokio::signal::ctrl_c()
+    pub async fn wait_for_shutdown_signal() -> std::io::Result<()> {
+        tokio::signal::ctrl_c().await
     }
 }
 
